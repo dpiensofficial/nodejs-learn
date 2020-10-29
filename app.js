@@ -1,37 +1,72 @@
-const http = require("http");
-const fs = require("fs");
+const path = require('path');
 
-const server = http.createServer((req, res) => {
-  const url = req.url;
-  const method = req.method;
-  //   const {method, headers, url} = req;
-  if (url === "/") {
-    res.write("<html>");
-    res.write("<head><title>Enter meassage</title></head>");
-    res.write(
-      '<body><form action="/message" method="POST"><input type="text"><button type="submit">submit</button></form></body>'
-    );
-    res.write("</html>");
+const express = require('express');
+const bodyParser = require('body-parser');
 
-    return res.end();
-  }
-  if (url === "/message" && method === "POST") {
-    const body = [];
-    req.on("data", (chunk) => {
-      console.log(chunk);
-      body.push(chunk);
-    });
-    console.log(body);
-    req.on("end", () => {
-      const parsedBody = Buffer.concat(body).toString();
-      const message = parsedBody.split("=")[1];
-      fs.writeFileSync("message.txt", message);
+const errorController = require('./controllers/error');
+const sequelize = require('./util/database');
+const Product = require('./models/product');
+const User = require('./models/user');
+const Cart = require('./models/cart');
+const CartItem = require('./models/cart-item');
+const Order = require('./models/order');
+const OrderItem = require('./models/order-item');
 
-      res.statusCode = 302;
-      res.setHeader("Location", "/");
-      return res.end();
-    });
-  }
+const app = express();
+
+app.set('view engine', 'ejs');
+app.set('views', 'views');
+
+const adminRoutes = require('./routes/admin');
+const shopRoutes = require('./routes/shop');
+
+app.use(bodyParser.urlencoded({ extended: false }));
+app.use(express.static(path.join(__dirname, 'public')));
+
+app.use((req, res, next) => {
+  User.findById(1)
+    .then(user => {
+      req.user = user;
+      next();
+    })
+    .catch(err => console.log(err));
 });
 
-server.listen(3000);
+app.use('/admin', adminRoutes);
+app.use(shopRoutes);
+
+app.use(errorController.get404);
+
+Product.belongsTo(User, { constraints: true, onDelete: 'CASCADE' });
+User.hasMany(Product);
+User.hasOne(Cart);
+Cart.belongsTo(User);
+Cart.belongsToMany(Product, { through: CartItem });
+Product.belongsToMany(Cart, { through: CartItem });
+Order.belongsTo(User);
+User.hasMany(Order);
+Order.belongsToMany(Product, { through: OrderItem });
+
+sequelize
+  // .sync({ force: true })
+  .sync()
+  .then(result => {
+    return User.findById(1);
+    // console.log(result);
+  })
+  .then(user => {
+    if (!user) {
+      return User.create({ name: 'Max', email: 'test@test.com' });
+    }
+    return user;
+  })
+  .then(user => {
+    // console.log(user);
+    return user.createCart();
+  })
+  .then(cart => {
+    app.listen(3000);
+  })
+  .catch(err => {
+    console.log(err);
+  });
